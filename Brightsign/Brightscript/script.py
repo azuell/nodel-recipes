@@ -1,276 +1,211 @@
 '''
-**Brightsign Node** <sup>v1.4</sup> 
+**Brightsign** for use with Nodel Brightsign Plugin
 
-Requires the [Nodel Brightsign Plugin](https://github.com/museumsvictoria/nodel-recipes/tree/master/Brightsign)
+`rev 4` rewite of original script by Troy Takac
 
----
+Includes:
 
-Monitors state of Brightsign, and allows remote control of Playback, Muting, and Sleep.
+*
 
-Sleep is the Brightsign's native 'Powersaving' mode, which disables all video and audio outputs and pauses playbacks, allowing screens to enter powersaving mode.
+**REVISION HISTORY**
+
+* 
 
 '''
-### -------------------- SETUP -------------------- ###
-import socket
 
-### -------------------- PARAMETERS AND VARIABLES -------------------- ###
+DEFAULT_SCRIPT_PORT     = 8081
+DEFAULT_UDP_PORT        = 5000
 
 param_playerConfig = Parameter({'title': 'Brightsign Config', 'schema': {'type': 'object', 'properties': {
-           'ipAddress': {'title': 'IP Address', 'type': 'string', 'hint': '192.168.1.10', 'order': 1},
-           'scriptPort': {'title': 'Script Port', 'type': 'string', 'hint': '8081', 'order': 2},
-           'udpPort': {'title': 'UDP Port', 'type': 'integer', 'hint': '5000', 'order': 3},
-        }}})
+            'ipAddress': {'title': 'IP Address', 'type': 'string', 'hint': 'IP Address', 'order': 1},
+            'scriptPort': {'title': 'Script Port', 'type': 'string', 'hint': '%s' % DEFAULT_SCRIPT_PORT, 'order': 2},
+            'udpPort': {'title': 'UDP Port', 'type': 'integer', 'hint': '%s' % DEFAULT_UDP_PORT, 'order': 3}}}})
 
-scriptPort = "8081"
-udpPort = 5000
-ipAddress = ""
-fullAddress = ""
-status_check_interval = 15
+param_disabled = Parameter({'schema': {'type': 'boolean'}, 'desc': 'Disables this node'})
 
+local_event_Model = LocalEvent({'group': 'Information', 'order': next_seq(), 'schema': {'type': 'string'}})
+local_event_Serial = LocalEvent({'group': 'Information', 'order': next_seq(), 'schema': {'type': 'string'}})
+local_event_VideoMode = LocalEvent({'group': 'Information', 'order': next_seq(), 'schema': {'type': 'string'}})
 
-### -------------------- EVENTS -------------------- ###
+local_event_Power = LocalEvent({'group': 'Power', 'order': next_seq(), 'schema': {'type': 'string', 'enum': ['On', 'Off']}, 'desc': 'Power State'})
+local_event_DesiredPower = LocalEvent({'group': 'Power', 'order': next_seq(), 'schema': {'type': 'string', 'enum': ['On', 'Off']}, 'desc': 'Desired Power State'})
 
-local_event_Power = LocalEvent({'group': 'Power', 'schema': {'type': 'string', 'enum': ['On', 'Off']},
-                                'desc': 'Power State'})
-local_event_DesiredPower = LocalEvent({'group': 'Power', 'schema': {'type': 'string', 'enum': ['On', 'Off']},
-                                'desc': 'Desired Power State'})
-# <Brightsign
-local_event_Model = LocalEvent({'order': next_seq(), 'schema': { 'type': 'string' }})
-                                
-local_event_Serial = LocalEvent({'order': next_seq(), 'schema': { 'type': 'string' }})
-                                
-local_event_VideoMode = LocalEvent({'order': next_seq(), 'schema': { 'type': 'string' }})
-                                
-local_event_Volume = LocalEvent({'order': next_seq(), 'schema': { 'type': 'string' }})
-                                
-local_event_Mute = LocalEvent({'group': 'Volume', 'order': next_seq(),'schema': {'type': 'string', 'enum': ['On', 'Off']},
-                                'desc': 'Mute State'})
+local_event_Volume = LocalEvent({'group': 'Volume', 'order': next_seq(), 'schema': {'type': 'string'}})
+local_event_Mute = LocalEvent({'group': 'Volume', 'order': next_seq(),'schema': {'type': 'string', 'enum': ['On', 'Off']}, 'desc': 'Mute State'})
+local_event_DesiredMute = LocalEvent({'group': 'Volume', 'order': next_seq(),'schema': {'type': 'string', 'enum': ['On', 'Off']}, 'desc': 'Desired Mute State'})  
 
-local_event_Playback = LocalEvent({'group': 'Playback', 'order': next_seq(),'schema': {'type': 'string'},
-                                'desc': 'Playback State'})
+local_event_Playback = LocalEvent({'group': 'Playback', 'order': next_seq(),'schema': {'type': 'string'}, 'desc': 'Playback State'})
+local_event_DesiredPlayback = LocalEvent({'group': 'Playback', 'order': next_seq(),'schema': {'type': 'string'}, 'desc': 'Desired Playback State'})
 
-local_event_DesiredPlayback = LocalEvent({'group': 'Playback', 'order': next_seq(),'schema': {'type': 'string'},
-                                'desc': 'Desired Playback State'})
+import sys
 
-local_event_DesiredMute = LocalEvent({'group': 'Volume', 'order': next_seq(),'schema': {'type': 'string', 'enum': ['On', 'Off']},
-                                'desc': 'Desired Mute State'})  
-# Brightsign/>
-
-
-### -------------------- ACTIONS -------------------- ###
-
-# <Power
-@local_action({'group': 'Power', 'order': next_seq(), 'schema': {'type': 'string', 'enum': ['On', 'Off']}})           
-def Power(arg):
-  if arg == "On":
-    lookup_local_event('DesiredPower').emit("On")
-    sendGet("/playback?sleep=false")
-  elif arg == "Off":
-    lookup_local_event('DesiredPower').emit("Off")
-    sendGet("/playback?sleep=true")
-
-@local_action({'group': 'Power', 'title': 'On', 'order': next_seq()})  
-def Wake(arg = None):
-  lookup_local_action("Power").call("On")
-
-@local_action({'group': 'Power', 'title': 'Off', 'order': next_seq()})  
-def Sleep(arg = None):
-  lookup_local_action("Power").call("Off")
-# Power/>
-
-# <Playback
-@local_action({'group': 'Playback', 'title': 'Play', 'order': next_seq()})  
-def Play(arg = None):
-  lookup_local_event('DesiredPlayback').emit("Playing")
-  sendGet("/playback?playback=play")
-
-@local_action({'group': 'Playback', 'title': 'Pause', 'order': next_seq()})  
-def Pause(arg = None):
-  lookup_local_event('DesiredPlayback').emit("Paused")
-  sendGet("/playback?playback=pause")
-# Playback/>
-
-# <Volume
-@local_action({ 'title': 'Volume', 'order': next_seq(), 'schema': { 'type': 'integer', 'hint': '(0 - 100%)' }})
-def Volume(arg):
-    if arg == None or arg < 0 or arg > 100:
-      console.warn('Volume: no arg or outside 0 - 100')
-      return
-    sendGet("/volume?%s" % arg)
-
-@local_action({'group': 'Power', 'title': 'Reboot', 'order': next_seq()})  
-def Reboot(arg = None):
-  console.log("Sending Reboot")
-  sendGet("/reboot?reboot=true")
-
-@local_action({'group': 'Volume', 'title': 'Mute', 'order': next_seq(), 'schema': {'type': 'string', 'enum': ['On', 'Off']}})  
-def Mute(arg):
-  if arg == "On":
-    local_event_DesiredMute.emit("On")
-    sendGet("/mute?mute")
-
-  elif arg == "Off":
-    local_event_DesiredMute.emit("Off")
-    sendGet("/mute?unmute")
-
-@local_action({'group': 'Volume', 'title': 'Mute On', 'order': next_seq()})
-def MuteOn():
-  Mute.call('On')
-  
-@local_action({'group': 'Volume', 'title': 'Mute Off', 'order': next_seq()})
-def MuteOff():
-  Mute.call('Off')  
-# Volume/>
-
-@local_action({'group': 'Status', 'title': 'Get Status', 'order': next_seq()})
-def GetStatus():
-  playerStatusGet()
-
-### -------------------- MAIN FUNCTIONS -------------------- ###
-
-def sendGet(value):
-  global fullAddress
-  try: 
-    resp = get_url(fullAddress + value, fullResponse=True)
-    playerStatusGet()
-  except: 
-    console.error("Failed to Connect")
-  else:
-    global _lastReceive
-    _lastReceive = system_clock()
-    if resp.statusCode != 200:
-      console.error("Failed to send.")
-
-def send_udp_string(msg):
-  #open socket
-  sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-  try:
-    sock.sendto(msg, (ipAddress, udpPort))
-  except socket.error, msg:
-    print "error: %s\n" % msg
-    local_event_Error.emit(msg)
-  finally:
-    if sock:
-      sock.close()
-      
-def playerStatusGet():
-  global fullAddress
-  try:
-    resp = get_url(fullAddress + "/status", method='GET', contentType='application/json', fullResponse=True)
-  except:
-    pass
-  else:
-    if resp.statusCode != 200:
-      console.error("Failed to connect")
-    else:
-      global _lastReceive
-      _lastReceive = system_clock()
-      status_decode = json_decode(resp.content)
-      lookup_local_event('Model').emit(status_decode['model'])
-      lookup_local_event('Volume').emit(status_decode['volume'])
-      lookup_local_event('Serial').emit(status_decode['serialNumber'])
-      lookup_local_event('VideoMode').emit(status_decode['videomode'])
-      lookup_local_event('volume').emit(status_decode['volume'])
-
-      if status_decode['sleep'] == "true":
-        lookup_local_event('Power').emit('Off')
-        if lookup_local_event('DesiredPower').getArg() == "On":
-          lookup_local_action("Sleep").call()
-      elif status_decode['sleep'] == "false":
-        lookup_local_event('Power').emit('On')
-        if lookup_local_event('DesiredPower').getArg() == "Off":
-          lookup_local_action("Wake").call()
-      
-
-      if status_decode['playing'] == "true" :
-        lookup_local_event('Playback').emit('Playing')
-        if lookup_local_event('DesiredPlayback').getArg() == "Paused":
-          lookup_local_action("Pause").call()
-      elif status_decode['playing'] == "false":
-        lookup_local_event('Playback').emit('Paused')
-        if lookup_local_event('DesiredPlayback').getArg() == "Playing":
-          lookup_local_action("Play").call()
-
-      if status_decode['muted'] == "true":
-        lookup_local_event('Mute').emit('On')
-        if lookup_local_event('DesiredMute').getArg() == "Off":
-          lookup_local_action("Mute").call("Off")
-      elif status_decode['muted'] == "false":
-        lookup_local_event('Mute').emit('Off')
-        if lookup_local_event('DesiredMute').getArg() == "On":
-          lookup_local_action("Mute").call("On")
-
-# Script Entrypoint
-def main(arg = None):
-  global ipAddress, scriptPort, udpPort, fullAddress
+def main():
+  if param_disabled:
+      return console.warn('Disabled! Nothing to do')
+    
   if is_blank((param_playerConfig or {}).get('ipAddress')):
-    console.error('No Address has been specified, nothing to do!')
-    return
-  else:
-    ipAddress = (param_playerConfig or {}).get('ipAddress')
-  scriptPort = (param_playerConfig or {}).get('scriptPort') or scriptPort
-  udpPort = (param_playerConfig or {}).get('udpPort') or udpPort
-
-  fullAddress = "http://%s:%s" % (ipAddress, scriptPort)
+    return console.warn('IP address not specified!')
   
-  console.log("Brightsign script started.")
+  
+    
+    # console.info('Polling will start in %ss' % _timer_sync.getDelay())
+    # _timer_sync.start()
+    # if is_blank(param_ipAddress):
+    #     _timer_sync.stop()
+    #     return console.warn('IP address not specified!')
+    
+    # console.info('Polling will start in %ss' % _timer_sync.getDelay())
+    # _timer_sync.start()
+    
+
+# # Script Entrypoint
+# def main(arg = None):
+#   global ipAddress, scriptPort, udpPort, fullAddress
+#   if is_blank((param_playerConfig or {}).get('ipAddress')):
+#     console.error('No Address has been specified, nothing to do!')
+#     return
+#   else:
+#     ipAddress = (param_playerConfig or {}).get('ipAddress')
+#   scriptPort = (param_playerConfig or {}).get('scriptPort') or scriptPort
+#   udpPort = (param_playerConfig or {}).get('udpPort') or udpPort
+
+#   fullAddress = "http://%s:%s" % (ipAddress, scriptPort)
+
+#   console.log("Brightsign script started.")
+
+# udp = UDP()
+
+# def SendUDP(message):
+    
+#     if (param_IP != None):
+#         if (param_PORT != None):
+#             destination = "%s:%s" % (param_IP, param_PORT)
+#         else:
+#             destination = "%s:%s" % (param_IP, DEFAULT_PORT)
+#         udp.setDest(destination)
+#         udp.send(message)
+#         console.log("UDP to %s sent" % destination)
+#     else:
+#         console.error("IP Address empty")
+
+### HTTP Communications
+
+_busy = False
+
+def call(command, forceLog=False, method=None, query=None, contentType=None, post=None, fullResponse=False):
+    # Avoid simultaneous calls by tracking one at a time
+    global _busy
+    if _busy:
+        return False
+    _busy = True
+
+    try:
+        scriptPort = DEFAULT_SCRIPT_PORT if is_blank(param_playerConfig.get('scriptPort')) else param_playerConfig.get('scriptPort')
+        url = 'http://%s:%s/%s' % (param_playerConfig.get('ipAddress'), scriptPort, command)
+
+        if forceLog: console.info('req: url%s' % url)
+        else: log(1, 'req: url%s' % url)
+
+        try:
+            timestamp = system_clock()
+            # get_url(url, method=None, query=None, username=None, password=None, headers=None, contentType=None, post=None, connectTimeout=10, readTimeout=15, fullResponse=False)
+            resp = get_url(url, method=method, query=query, contentType=None, post=post, connectTimeout=5, readTimeout=5, fullResponse=fullResponse)
+        except:
+            e = sys.exc_info()[1]   # Tuple order is excType, value, trace
+            msg = 'get_url: failed (took %0.1f) with "%s"' % ((system_clock()-timestamp)/1000.0, e)
+
+            if forceLog: console.warn(msg)
+            else:       warn(1, msg)
+
+            return False
+
+        log(1, 'resp: %s' % resp)
+
+        global _lastReceive
+        _lastReceive = system_clock()
+
+        return resp
+    
+    finally:
+        _busy = False
+
+@local_action({'title': 'test full resp'})
+def test():
+  resp = call('status', forceLog=True, method='GET', contentType='application/json', fullResponse=True)
+  console.log(resp)
+
+@local_action({'title': 'Get Info', 'order': next_seq()})
+def status():
+  resp = call('status', forceLog=True, method='GET', contentType='application/json')
+  console.log(resp)
+  status_decode = json_decode(resp)
+
+  lookup_local_event('Model').emit(status_decode['model'])
+  
+  lookup_local_event('Serial').emit(status_decode['serialNumber'])
+  lookup_local_event('VideoMode').emit(status_decode['videomode'])
+
+  lookup_local_event('Volume').emit(status_decode['volume'])
+  #muted: false
+
+  #playing: true
+  #sleep: false
 
 
-### -------------------- STATUS AND MONITORING -------------------- ###
+### Status and Error Reporting
 
-# <status and error reporting ---
-
-# for comms drop-out
 _lastReceive = 0
 
-# roughly, the last contact  
 local_event_LastContactDetect = LocalEvent({'group': 'Status', 'order': 99999+next_seq(), 'title': 'Last contact detect', 'schema': {'type': 'string'}})
 
-# node status
 local_event_Status = LocalEvent({'group': 'Status', 'order': 99999+next_seq(), 'schema': {'type': 'object', 'properties': {
-        'level': {'type': 'integer', 'order': 1},
-        'message': {'type': 'string', 'order': 2}}}})
-  
-def nodeStatusCheck():
-  diff = (system_clock() - _lastReceive)/1000.0 # (in secs)
-  now = date_now()
-  
-  if diff > status_check_interval+15:
-    previousContactValue = local_event_LastContactDetect.getArg()
+  'level': {'type': 'integer', 'order': 1},
+  'message': {'type': 'string', 'order': 2}}}})
+
+def statusCheck():
+  diff = (system_clock() - _lastReceive)/1000.0 # in secs
+
+  if diff > status_check_interval:
+    previous_contact_value = local_event_LastContactDetect.getArg()
     
-    if previousContactValue == None:
-      message = 'Always been missing.'
-      
+    if previous_contact_value == None:
+      message = 'Never seen'
     else:
-      previousContact = date_parse(previousContactValue)
-      roughDiff = (now.getMillis() - previousContact.getMillis())/1000/60
-      if roughDiff < 60:
-        message = 'Missing for approx. %s mins' % roughDiff
-      elif roughDiff < (60*24):
-        message = 'Missing since %s' % previousContact.toString('h:mm a')
-      else:
-        message = 'Missing since %s' % previousContact.toString('h:mm a, E d-MMM')
-      
-    local_event_Status.emit({'level': 2, 'message': message})
+      previous_contact = date_parse(previous_contact_value)
+      message = 'Missing %s' % formatPeriod(previous_contact)
+      local_event_Status.emit({'level': 2, 'message': message})
     
   else:
-    # update contact info
-    local_event_LastContactDetect.emit(str(now))
-    
-    # TODO: check internal device status if possible
-
-    local_event_LastContactDetect.emit(str(now))
+    local_event_LastContactDetect.emit(str(date_now()))
     local_event_Status.emit({'level': 0, 'message': 'OK'})
 
-# --->
+def formatPeriod(date, as_instant=False):
+  """Takes in a date object and returns the phrase to be displayed in the dashboard"""
 
-playerStatus_timer = Timer(playerStatusGet, status_check_interval)
-nodeStatus_timer = Timer(nodeStatusCheck, status_check_interval)
+  if date == None:
+    return 'for unknown period'
+    
+  time_difference = (date_now().getMillis() - date.getMillis()) / 1000 / 60 # in mins
 
-# <!-- logging
+  if time_difference < 0:
+    return 'never ever'
+  elif time_difference == 0:
+    return 'for <1 min' if not as_instant else '<1 min ago'
+  elif time_difference < 60:
+    return ('for <%s mins' if not as_instant else '<%s mins ago') % time_difference
+  elif time_difference < 60*24:
+    return ('since %s' if not as_instant else 'at %s') % date.toString('h:mm:ss a')
+  else:
+    return ('since %s' if not as_instant else 'at %s') % date.toString('E d-MMM h:mm:ss a')
+    
+status_check_interval = 75
 
-local_event_LogLevel = LocalEvent({'group': 'Debug', 'order': 10000+next_seq(), 'desc': 'Use this to ramp up the logging (with indentation)',  
-                                   'schema': {'type': 'integer'}})
+status_timer = Timer(statusCheck, status_check_interval)
+
+
+### Logging
+
+local_event_LogLevel = LocalEvent({'group': 'Debug', 'order': 10000+next_seq(), 'desc': 'Use this to ramp up the logging (with indentation)', 'schema': {'type': 'integer'}})
 
 def warn(level, msg):
   if (local_event_LogLevel.getArg() or 0) >= level:
@@ -280,93 +215,5 @@ def log(level, msg):
   if (local_event_LogLevel.getArg() or 0) >= level:
     console.log(('  ' * level) + msg)
 
-# --!>
-
-# <--- convenience functions
-
-# Converts into a brief time relative to now
-def toBriefTime(dateTime):
-  now = date_now()
-  nowMillis = now.getMillis()
-
-  diff = (nowMillis - dateTime.getMillis()) / 60000 # in minutes
-  
-  if diff == 0:
-    return '<1 min ago'
-  
-  elif diff < 60:
-    return '%s mins ago' % diff
-
-  elif diff < 24*60:
-    return dateTime.toString('h:mm:ss a')
-
-  elif diff < 365 * 24*60:
-    return dateTime.toString('h:mm:ss a, E d-MMM')
-
-  elif diff > 10 * 365*24*60:
-    return 'never'
-    
-  else:
-    return '>1 year'
-
-# Decodes a typical process arg list string into an array of strings allowing for
-# limited escaping or quoting or both.
-#
-# For example, turns:
-#    --name "Peter Parker" --character Spider\ Man
-
-# into:
-#    ['--name', '"Peter Parker"', '--character', 'Spider Man']   (Python list)
-#
-def decodeArgList(argsString):
-  argsList = list()
-  
-  escaping = False
-  quoting = False
-  
-  currentArg = list()
-  
-  for c in argsString:
-    if escaping:
-      escaping = False
-
-      if c == ' ' or c == '"': # put these away immediately (space-delimiter or quote)
-        currentArg.append(c)
-        continue      
-      
-    if c == '\\':
-      escaping = True
-      continue
-      
-    # not escaping or dealt with special characters, can deal with any char now
-    
-    if c == ' ': # delimeter?
-      if not quoting: 
-        # hit the space delimeter (outside of quotes)
-        if len(currentArg) > 0:
-          argsList.append(''.join(currentArg))
-          del currentArg[:]
-          continue
-
-    if c == ' ' and len(currentArg) == 0: # don't fill up with spaces
-      pass
-    else:
-      currentArg.append(c)
-    
-    if c == '"': # quoting?
-      if quoting: # close quote
-        quoting = False
-        argsList.append(''.join(currentArg))
-        del currentArg[:]
-        continue
-        
-      else:
-        quoting = True # open quote
-  
-  if len(currentArg) > 0:
-      argsList.append(''.join(currentArg))
-
-  return argsList
 
 
-# convenience --->
