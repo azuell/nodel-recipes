@@ -1,16 +1,15 @@
 '''
 **OSC Client** Node
 
+`REV 3 2026.05.04`
+
 - Unidirectional only. 
 - Turn OSC messages (address pattern + optional argument) into local actions via parameters. 
 - Send custom OSC messages via a custom local action.
 
-`REV 3 2026.05.04`
-
 **REVISION HISTORY**
 
-* rev. 3 (2026.05.04): Add option for remote binding of IP address
-* rev. 2 (2023.02.07)
+* rev. 3: Add option for remote binding of IP address
 
 '''
 
