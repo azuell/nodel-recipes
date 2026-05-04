@@ -1,11 +1,16 @@
 '''
-OSC Client Node
+**OSC Client** Node
 
-`rev 2 2023.02.07`
-
-- Unidirectional only.
-- Turn OSC messages (address pattern + optional argument) into local actions via parameters.
+- Unidirectional only. 
+- Turn OSC messages (address pattern + optional argument) into local actions via parameters. 
 - Send custom OSC messages via a custom local action.
+
+`REV 3 2026.05.04`
+
+**REVISION HISTORY**
+
+* rev. 3 (2026.05.04): Add option for remote binding of IP address
+* rev. 2 (2023.02.07)
 
 '''
 
@@ -30,18 +35,18 @@ DEFAULT_PORT = 9000
 
 DEFAULT_PATTERN = "/foo/bar"
 
-param_ipAddress = Parameter({'title': 'IP address', 'schema': {
-                            'type': 'string', 'hint': DEFAULT_IPADDRESS}, 'order': next_seq()})
+local_event_IPAddress = LocalEvent({'schema': {'type': 'string'}})
+
+param_ipAddress = Parameter({'title': 'IP address', 'schema': {'type': 'string', 'hint': '%s (overrides bindings)' % DEFAULT_IPADDRESS}, 'order': next_seq()})
+
 param_port = Parameter({'title': 'Port', 'schema': {
-                       'type': 'integer', 'hint': DEFAULT_PORT}, 'order': next_seq()})
+                        'type': 'integer', 'hint': DEFAULT_PORT}, 'order': next_seq()})
 
 param_patterns = Parameter({'title': 'Patterns', 'order': next_seq(), 'schema': {'type': 'array', 'items': {
     'type': 'object', 'title': 'Pattern', 'properties': {
             'label': {'type': 'string', 'title': 'Label', 'hint': 'Foobar', 'order': next_seq()},
         'address': {'type': 'string', 'title': 'Address', 'hint': '/foo/bar', 'order': next_seq()}
     }}}})
-
-# -->
 
 # <-- functions
 
@@ -112,13 +117,43 @@ udp = UDP(ready=lambda: console.info('UDP ready. %s' % udp.getDest()))
 
 # -->
 
+# <-- remote IP binding
+
+def remote_event_IPAddress(arg):
+  if is_blank(param_ipAddress):
+    prev = local_event_IPAddress.getArg()
+    if prev != arg:
+      console.info("IP address updated to %s (previously %s)" % (arg, prev))
+      local_event_IPAddress.emit(arg)
+
+      dest = "%s:%s" % (arg, param_port or DEFAULT_PORT)
+      console.info("Will connect to %s..." % dest)
+      udp.setDest(dest)
+
+# -->
+
 # <-- main
 
 def main(arg=None):
   console.log('Nodel script started.')
 
-  udp.setDest((param_ipAddress or DEFAULT_IPADDRESS) +
-              ':' + str(param_port or DEFAULT_PORT))
+  if is_blank(param_ipAddress):
+    # try last dynamic address
+    if not is_blank(local_event_IPAddress.getArg()):
+      ipAddr = local_event_IPAddress.getArg()
+      console.info("Last dynamic IP address used: %s" % ipAddr)
+    else:
+      ipAddr = DEFAULT_IPADDRESS
+      console.info("Using default IP address: %s" % ipAddr)
+    
+  else:
+    ipAddr = param_ipAddress
+    console.info("Fixed config IP address target: %s" % ipAddr)
+  local_event_IPAddress.emitIfDifferent(ipAddr)
+
+  dest = "%s:%s" % (ipAddr, param_port or DEFAULT_PORT)
+  console.info("Will connect to %s..." % dest)
+  udp.setDest(dest)
   
   # Create a generic local actions for sending custom OSC messages
   create_custom_action()
