@@ -3,7 +3,7 @@ Alcorn McBride **8 TraXX** Eight Independent MP3 Players
 
 ---
 
-`REV 2 2026.07.01 azuell`
+`REV 2 2026.07.08 azuell`
 
 * Sends commands via RS232C Serial Control
 * Use '*' to target all channels
@@ -17,8 +17,6 @@ Alcorn McBride **8 TraXX** Eight Independent MP3 Players
 * _rev. 2: Update for sharing_
 * _rev. 1: Initial release_
 '''
-
-# TO DO - Response parsing, incl errors
 
 STATUS_CHECK_INTERVAL = 30 #s
 
@@ -65,10 +63,15 @@ def tcp_timeout():
   log(0, 'tcp_timeout')
 
 def tcp_sent(data):
-  log(1, 'tcp_sent [%s]' % data)
+  log(2, 'tcp_sent [%s]' % data)
 
 def tcp_received(data):
-  log(1, 'tcp_received [%s]' % data)
+  log(2, 'tcp_received [%s]' % data)
+
+  global _lastReceive
+  _lastReceive = system_clock() # Any response is proof of presence
+
+  ParseResponse(data)
 
 tcp = TCP(connected=tcp_connected, 
           disconnected=tcp_disconnected, 
@@ -89,14 +92,14 @@ def SetupTCP():
   
   if param_ipAddress and param_Port:
     newDest = '%s:%s' % (param_ipAddress, param_Port)
-    console.info('Setting dest from params [%s]' % newDest)
+    info(0, 'Setting dest from params [%s]' % newDest)
     
   elif local_event_IPAddress.getArg() and local_event_Port.getArg():
     newDest = '%s:%s' % (local_event_IPAddress.getArg(), local_event_Port.getArg())
-    console.info('Setting dest from binding [%s]' % newDest)
+    info(0, 'Setting dest from binding [%s]' % newDest)
     
   else:
-    console.warn('IP params or IP binding not specified!')
+    warn(0, 'IP params or IP binding not specified!')
     return
   
   tcp.setDest(newDest)
@@ -115,7 +118,7 @@ def PlayFileToChannel(arg):
   else:     cmd = '%sPL' % (channel)
     
   log(1, 'PlayFile: cmd [%s]' % cmd)
-  
+
   tcp.send(cmd)
 
 ### Loop Play
@@ -132,7 +135,7 @@ def LoopPlayToChannel(arg):
   else:     cmd = '%sLP' % (channel)
     
   log(1, 'LoopPlay: cmd [%s]' % cmd)
-  
+
   tcp.send(cmd)
 
 ### Assign Sound
@@ -149,7 +152,7 @@ def AssignSoundToChannel(arg):
   else:     cmd = '%sSE' % (channel)
     
   log(1, 'AssignSound: cmd [%s]' % cmd)
-  
+
   tcp.send(cmd)
 
 ### Reset Channel
@@ -163,7 +166,7 @@ def ResetChannel(arg):
   cmd = '%sRJ' % channel
     
   log(1, 'ResetChannel: cmd [%s]' % cmd)
-  
+
   tcp.send(cmd)
 
 #Mute/UnMute Channel
@@ -181,7 +184,7 @@ def MuteChannel(arg):
   else:               cmd = '1%sAD' % channel
     
   log(1, 'MuteChannel: cmd [%s] (%s)' % (cmd, mute))
-  
+
   tcp.send(cmd)
 
 #Keylock Control
@@ -191,13 +194,12 @@ def MuteChannel(arg):
                 'State': {'type': 'string', 'enum': ['Enable', 'Disable'], 'order': 1}}}})
 def KeylockControl(arg):
   state = arg.get('State')
-    
+
   # 0 for disable, 1 for enable
-  if mute == 'Disable':  cmd = '0%sKL' % channel
-  else:                  cmd = '1%sKL' % channel
-    
+  cmd = '0KL' if state == 'Disable' else '1KL'
+
   log(1, 'KeylockControl: cmd [%s] (%s)' % (cmd, state))
-  
+
   tcp.send(cmd)
 
 ### Version Request
@@ -212,37 +214,26 @@ def PollVersion():
     if not resp.startswith('Alcorn McBride 8TraXX'):
       warn(0, 'Bad resp to version request')
       return
-    
-    _lastReceive = system_clock() # Use valid resp as proof of presence
-    
+
     local_event_Version.emit(resp[resp.lower().find('v'):])
     
   tcp.request('?V', resp_handler)
 
-### Completion Acknowledge Mode
-
 ### Error Codes
 
-# def ParseResponse(data):
-#   # Check for errors
-#   if data.startswith('E'):
-#     ParseErrorResponse(data)
+local_event_LastError = LocalEvent({'group': 'Status', 'order': next_seq(), 'title': 'Last error', 'schema': {'type': 'string'}})
 
-  
-# # def parseMessage(data):
-# #     # check for errors
-# #     if data.startswith('ERR'):
-# #         parseErrorMessage(data)
-        
-# #     elif data.startswith('SERIAL,'):
-# #         parseSerialResponse(data)
-        
-# #     func = responseFeedbackFunctions.get(data)
-# #     if func is not None:
-# #         func()
+def IsErrorCode(data):
+  return len(data) == 3 and data[0] == 'E' and data[1:].isdigit()
 
+def ParseErrorResponse(data):
+  message = ERROR_CODES.get(data, 'Unknown error code')
+  warn(0, 'error response [%s] %s' % (data, message))
+  local_event_LastError.emit('%s (%s)' % (message, data))
 
-
+def ParseResponse(data):
+  if IsErrorCode(data):
+    ParseErrorResponse(data)
 
 ### Status
 
