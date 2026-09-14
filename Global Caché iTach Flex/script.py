@@ -3,10 +3,11 @@ Global Cache **iTach Flex IP Ethernet PoE**
 
 ---
 
-`REV 2 2026.07.14 azuell`
+`REV 2 2026.07.27 azuell`
 
 * Using the Global Cache Unified API over TCP
-* For use with Flex Link Cables - Infrared, Serial, Relay and Sensor
+* For use with Flex Link Cables - Relay and Sensor
+* TODO: Infrared, Serial
 
 **MANUAL**
 
